@@ -83,7 +83,7 @@ const ProfilePreview = ({ profile, onClose, onLike, onSuperLike, onPass }) => {
           ×
         </button>
 
-        {/* Photo Section - Only show if verified */}
+        {/* Avatar Section */}
         <div
           style={{
             width: '100%',
@@ -92,114 +92,31 @@ const ProfilePreview = ({ profile, onClose, onLike, onSuperLike, onPass }) => {
             background: 'var(--gradient-primary)',
             borderRadius: '24px 24px 0 0',
             overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            color: 'white',
           }}
         >
-          {canShowPhotos && displayPhoto ? (
-            <>
-              <img
-                src={displayPhoto}
-                alt={profile?.name}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
-                onError={(e) => {
-                  e.target.style.display = 'none'
-                }}
-              />
-              {/* Photo Navigation (hidden since we only show first photo) */}
-              {photos.length > 1 && (
-                <>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handlePreviousPhoto()
-                    }}
-                    style={{
-                      position: 'absolute',
-                      left: '16px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '50%',
-                      border: 'none',
-                      background: 'rgba(0, 0, 0, 0.5)',
-                      color: 'white',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backdropFilter: 'blur(10px)',
-                    }}
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleNextPhoto()
-                    }}
-                    style={{
-                      position: 'absolute',
-                      right: '16px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '50%',
-                      border: 'none',
-                      background: 'rgba(0, 0, 0, 0.5)',
-                      color: 'white',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backdropFilter: 'blur(10px)',
-                    }}
-                  >
-                    ›
-                  </button>
-                </>
-              )}
-            </>
-          ) : (
-            // Placeholder for unverified profiles
-            <div
-              style={{
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'column',
-                color: 'white',
-              }}
-            >
-              <div
-                style={{
-                  width: '120px',
-                  height: '120px',
-                  borderRadius: '50%',
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '48px',
-                  fontWeight: '700',
-                  marginBottom: '16px',
-                }}
-              >
-                {profile?.name?.charAt(0) || '?'}
-              </div>
-              <p style={{ fontSize: '16px', opacity: 0.8 }}>
-                {profile?.verified === false 
-                  ? 'Profile verification pending' 
-                  : 'Photo not available'}
-              </p>
-            </div>
-          )}
+          <div
+            style={{
+              width: '160px',
+              height: '160px',
+              borderRadius: '50%',
+              background: 'rgba(255, 255, 255, 0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '72px',
+              fontWeight: '700',
+              marginBottom: '16px',
+              border: '4px solid rgba(255, 255, 255, 0.3)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
+            }}
+          >
+            {profile?.name?.charAt(0) || '?'}
+          </div>
 
           {/* Verified Badge */}
           {profile?.verified && (

@@ -1,36 +1,31 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
 :root {
-  /* Primary Colors - Purple/Violet Theme */
-  --primary-color: #7c3aed;
-  --primary-light: #a78bfa;
-  --primary-dark: #6d28d9;
-  --primary-50: #faf5ff;
-  --primary-100: #f3e8ff;
-  --primary-200: #e9d5ff;
-  --primary-300: #d8b4fe;
+  /* Primary Colors - Modern Blue/Purple Theme */
+  --primary-color: #6366f1;
+  --primary-light: #818cf8;
+  --primary-dark: #4f46e5;
+  --primary-50: #eef2ff;
+  --primary-100: #e0e7ff;
+  --primary-200: #c7d2fe;
+  --primary-300: #a5b4fc;
   
   /* Secondary Colors */
-  --secondary-color: #ec4899;
-  --secondary-light: #f472b6;
-  --secondary-dark: #db2777;
+  --secondary-color: #8b5cf6;
+  --secondary-light: #a78bfa;
+  --secondary-dark: #7c3aed;
   
   /* Accent Colors */
   --accent-blue: #3b82f6;
   --accent-teal: #14b8a6;
   --accent-amber: #f59e0b;
   --accent-emerald: #10b981;
+  --accent-pink: #ec4899;
   
   /* Neutral Colors - Light Mode */
-  --background: #fafafa;
+  --background: #f8fafc;
   --surface: #ffffff;
   --surface-elevated: #ffffff;
   --text-primary: #0f172a;
-  --text-secondary: #64748b;
+  --text-secondary: #475569;
   --text-tertiary: #94a3b8;
   --border-color: #e2e8f0;
   --border-light: #f1f5f9;
@@ -45,12 +40,12 @@
   --info: #3b82f6;
   --info-light: #dbeafe;
   
-  /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #7c3aed 0%, #a78bfa 50%, #ec4899 100%);
-  --gradient-primary-subtle: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
-  --gradient-card: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-  --gradient-card-alt: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a78bfa 100%);
-  --gradient-surface: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+  /* Modern Gradients */
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+  --gradient-primary-subtle: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+  --gradient-card: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+  --gradient-card-alt: linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #8b5cf6 100%);
+  --gradient-surface: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -59,6 +54,19 @@
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   --shadow-colored: 0 10px 15px -3px rgba(124, 58, 237, 0.3), 0 4px 6px -2px rgba(124, 58, 237, 0.2);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background-color: #fafafa;
+  color: #0f172a;
 }
 
 body {
@@ -126,9 +134,13 @@ body {
 
 .header-title {
   font-family: 'Poppins', 'Inter', sans-serif;
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .header-icon {
@@ -163,17 +175,18 @@ body {
   position: relative;
 }
 
-/* Card Styles */
+/* Card Styles - Modern Design */
 .card {
   background: var(--surface);
-  border-radius: 20px;
-  padding: 20px;
+  border-radius: 24px;
+  padding: 24px;
   margin-bottom: 16px;
-  box-shadow: var(--shadow);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
   border: 1px solid var(--border-light);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(10px);
 }
 
 .card::before {
@@ -182,15 +195,15 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 3px;
+  height: 4px;
   background: var(--gradient-primary);
   opacity: 0;
   transition: opacity 0.3s;
 }
 
 .card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   border-color: var(--primary-200);
 }
 
@@ -199,7 +212,7 @@ body {
 }
 
 .card:active {
-  transform: translateY(0) scale(0.98);
+  transform: translateY(-2px) scale(0.99);
 }
 
 .card-header {
@@ -248,28 +261,30 @@ body {
   letter-spacing: -0.005em;
 }
 
-/* Button Styles */
+/* Button Styles - Modern Design */
 .btn {
-  padding: 14px 24px;
+  padding: 14px 28px;
   border: none;
-  border-radius: 12px;
+  border-radius: 16px;
   font-family: 'Inter', sans-serif;
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
+  overflow: hidden;
 }
 
 .btn-primary {
   background: var(--gradient-primary);
   color: white;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.39);
   position: relative;
   overflow: hidden;
 }
@@ -281,13 +296,13 @@ body {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transition: left 0.5s;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.6s;
 }
 
 .btn-primary:hover {
-  box-shadow: var(--shadow-colored);
-  transform: translateY(-1px);
+  box-shadow: 0 6px 20px 0 rgba(99, 102, 241, 0.5);
+  transform: translateY(-2px);
 }
 
 .btn-primary:hover::before {
@@ -296,7 +311,7 @@ body {
 
 .btn-primary:active {
   transform: translateY(0) scale(0.98);
-  box-shadow: var(--shadow);
+  box-shadow: 0 2px 8px 0 rgba(99, 102, 241, 0.3);
 }
 
 .btn-secondary {

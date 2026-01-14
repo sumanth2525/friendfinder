@@ -1,4 +1,4 @@
-import { HomeIcon, MessageIcon, SearchIcon, UserIcon } from './Icons'
+import { HomeIcon, MessageIcon, SearchIcon, UserIcon, GroupsIcon } from './Icons'
 import { getMatches } from '../utils/localStorage'
 
 const BottomNav = ({ activeTab, setActiveTab }) => {
@@ -7,6 +7,7 @@ const BottomNav = ({ activeTab, setActiveTab }) => {
 
   const navItems = [
     { id: 'home', label: 'Discover', Icon: HomeIcon },
+    { id: 'groups', label: 'Groups', Icon: GroupsIcon },
     { id: 'matches', label: 'Matches', Icon: MessageIcon, badge: unreadCount > 0 ? unreadCount : null },
     { id: 'search', label: 'Search', Icon: SearchIcon },
     { id: 'profile', label: 'Profile', Icon: UserIcon },

@@ -1,13 +1,23 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { messages } from '../data/datingProfiles'
-import { getMatches, blockUser, saveMatches } from '../utils/localStorage'
+import { getMatches, blockUser, saveMatches, getUser } from '../utils/localStorage'
 import { formatLastActive, formatTime } from '../utils/timeUtils'
 import { FlagIcon, BanIcon, CheckIcon } from '../components/Icons'
+import { realtimeChatService } from '../services/realtimeChat'
+import { supabase } from '../config/supabase'
 
 const Messages = ({ selectedMatchId, onBack }) => {
+  const currentUser = getUser()
   const [messageText, setMessageText] = useState('')
   const [currentMessages, setCurrentMessages] = useState([])
   const messagesEndRef = useRef(null)
+  const [conversationId, setConversationId] = useState(null)
+  const [isTyping, setIsTyping] = useState(false)
+  const [otherUserTyping, setOtherUserTyping] = useState(false)
+  const typingTimeoutRef = useRef(null)
+  const unsubscribeMessagesRef = useRef(null)
+  const unsubscribeTypingRef = useRef(null)
+  const [useRealtime, setUseRealtime] = useState(false)
 
   const [match, setMatch] = useState(null)
   const matchMessages = messages[selectedMatchId] || []
@@ -36,33 +46,150 @@ const Messages = ({ selectedMatchId, onBack }) => {
   }, [selectedMatchId, match])
 
   useEffect(() => {
-    const savedMatches = getMatches()
-    const foundMatch = savedMatches.find(m => m.id === selectedMatchId)
+    // Use prop match if provided, otherwise find from localStorage
+    const foundMatch = propMatch || getMatches().find(m => m.id === selectedMatchId)
     setMatch(foundMatch)
-  }, [selectedMatchId])
+    
+    // Check if we should use real-time (if Supabase is configured and match has real ID)
+    if (supabase && foundMatch?.id && currentUser?.id) {
+      setUseRealtime(true)
+      initRealtimeChat(foundMatch.id)
+    } else {
+      setUseRealtime(false)
+      setCurrentMessages(matchMessages)
+    }
+  }, [selectedMatchId, currentUser?.id, propMatch])
 
+  // Initialize real-time chat
+  const initRealtimeChat = async (matchId) => {
+    if (!supabase || !currentUser?.id) return
+
+    try {
+      // Get or create conversation
+      const { data: conversation, error } = await realtimeChatService.getOrCreateConversation(matchId)
+      
+      if (error) {
+        console.error('Error getting conversation:', error)
+        setUseRealtime(false)
+        setCurrentMessages(matchMessages)
+        return
+      }
+
+      setConversationId(conversation.id)
+
+      // Load existing messages
+      const { data: existingMessages } = await realtimeChatService.getMessages(conversation.id, 100)
+      if (existingMessages) {
+        setCurrentMessages(existingMessages)
+      }
+
+      // Subscribe to new messages
+      unsubscribeMessagesRef.current = realtimeChatService.subscribeToMessages(
+        conversation.id,
+        (newMessage) => {
+          setCurrentMessages(prev => {
+            if (prev.some(msg => msg.id === newMessage.id)) {
+              return prev
+            }
+            return [...prev, newMessage]
+          })
+        }
+      )
+
+      // Subscribe to typing indicators
+      unsubscribeTypingRef.current = realtimeChatService.subscribeToTyping(
+        conversation.id,
+        currentUser.id,
+        (payload) => {
+          setOtherUserTyping(payload.isTyping)
+          setTimeout(() => setOtherUserTyping(false), 3000)
+        }
+      )
+
+      // Mark messages as read
+      realtimeChatService.markAsRead(conversation.id, currentUser.id)
+    } catch (error) {
+      console.error('Error initializing real-time chat:', error)
+      setUseRealtime(false)
+      setCurrentMessages(matchMessages)
+    }
+  }
+
+  // Cleanup subscriptions
   useEffect(() => {
-    setCurrentMessages(matchMessages)
-  }, [selectedMatchId, matchMessages])
+    return () => {
+      if (unsubscribeMessagesRef.current) {
+        unsubscribeMessagesRef.current()
+      }
+      if (unsubscribeTypingRef.current) {
+        unsubscribeTypingRef.current()
+      }
+    }
+  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [currentMessages])
 
-  const handleSendMessage = (e) => {
+  // Handle typing indicator
+  const handleTyping = useCallback(() => {
+    if (!conversationId || !currentUser?.id || !useRealtime) return
+
+    setIsTyping(true)
+    realtimeChatService.sendTypingIndicator(conversationId, currentUser.id, true)
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false)
+      realtimeChatService.sendTypingIndicator(conversationId, currentUser.id, false)
+    }, 2000)
+  }, [conversationId, currentUser?.id, useRealtime])
+
+  const handleSendMessage = async (e) => {
     e.preventDefault()
     if (!messageText.trim()) return
 
-    const newMessage = {
-      id: currentMessages.length + 1,
-      senderId: 'current',
-      text: messageText,
-      timestamp: Date.now(),
-      read: false, // Will be read when they view it
+    const content = messageText.trim()
+    setMessageText('')
+
+    // Stop typing indicator
+    if (useRealtime) {
+      setIsTyping(false)
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current)
+      }
+      if (conversationId && currentUser?.id) {
+        realtimeChatService.sendTypingIndicator(conversationId, currentUser.id, false)
+      }
     }
 
-    setCurrentMessages([...currentMessages, newMessage])
-    setMessageText('')
+    // Use real-time if available
+    if (useRealtime && conversationId && currentUser?.id) {
+      const { error } = await realtimeChatService.sendMessage(
+        conversationId,
+        currentUser.id,
+        content
+      )
+
+      if (error) {
+        console.error('Error sending message:', error)
+        alert('Failed to send message. Please try again.')
+        setMessageText(content) // Restore message text
+      }
+    } else {
+      // Fallback to localStorage
+      const newMessage = {
+        id: currentMessages.length + 1,
+        senderId: 'current',
+        text: content,
+        timestamp: Date.now(),
+        read: false,
+      }
+      setCurrentMessages([...currentMessages, newMessage])
+    }
   }
 
   const handleReport = () => {
@@ -73,14 +200,27 @@ const Messages = ({ selectedMatchId, onBack }) => {
   }
 
   const handleBlock = () => {
-    if (confirm(`Are you sure you want to block ${match?.profile.name}?`)) {
-      blockUser(match.profile.id)
-      alert(`${match.profile.name} has been blocked.`)
+    if (!match?.profile) {
+      alert('Unable to block user: Invalid profile')
+      return
+    }
+    
+    const profileName = match.profile.name || 'this user'
+    const profileId = match.profile.id
+    
+    if (!profileId) {
+      alert('Unable to block user: Invalid profile ID')
+      return
+    }
+    
+    if (confirm(`Are you sure you want to block ${profileName}?`)) {
+      blockUser(profileId)
+      alert(`${profileName} has been blocked.`)
       if (onBack) onBack()
     }
   }
 
-  if (!match) {
+  if (!match || !match.profile) {
     return (
       <div style={{ textAlign: 'center', padding: '40px 20px' }}>
         <p style={{ color: 'var(--text-secondary)' }}>Select a match to start messaging</p>
@@ -136,14 +276,20 @@ const Messages = ({ selectedMatchId, onBack }) => {
             flexShrink: 0,
           }}
         >
-          {match.profile.name.charAt(0)}
+          {match.profile?.name?.charAt(0) || '?'}
         </div>
         <div style={{ flex: 1 }}>
           <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-primary)' }}>
-            {match.profile.name}
+            {match.profile?.name || 'Unknown'}
           </h3>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            {formatLastActive(match.profile.online ? 'Active now' : match.profile.lastActive)}
+            {otherUserTyping ? (
+              <span style={{ color: 'var(--primary-color)', fontStyle: 'italic' }}>typing...</span>
+            ) : match.profile?.online ? (
+              'Active now'
+            ) : (
+              formatLastActive(match.profile?.lastActive || '')
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -187,64 +333,105 @@ const Messages = ({ selectedMatchId, onBack }) => {
           gap: '12px',
         }}
       >
-        {currentMessages.map((message) => {
-          const isCurrentUser = message.senderId === 'current'
-          return (
-            <div
-              key={message.id}
-              style={{
-                display: 'flex',
-                justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
-              }}
-            >
+        {currentMessages.length === 0 ? (
+          <div style={{ 
+            textAlign: 'center', 
+            padding: '40px 20px',
+            color: 'var(--text-secondary)'
+          }}>
+            <p>No messages yet. Start the conversation!</p>
+          </div>
+        ) : (
+          currentMessages.map((message) => {
+            // Handle both real-time (Supabase) and localStorage formats
+            const isCurrentUser = useRealtime 
+              ? message.sender_id === currentUser?.id
+              : message.senderId === 'current'
+            const messageText = useRealtime ? message.content : message.text
+            const messageTimestamp = useRealtime 
+              ? new Date(message.created_at).getTime()
+              : message.timestamp
+            const isRead = useRealtime 
+              ? message.read_at !== null
+              : message.read
+
+            return (
               <div
+                key={message.id}
                 style={{
-                  maxWidth: '75%',
-                  padding: '12px 16px',
-                  borderRadius: '18px',
-                  background: isCurrentUser
-                    ? 'var(--gradient-primary)'
-                    : 'var(--surface)',
-                  color: isCurrentUser ? 'white' : 'var(--text-primary)',
-                  boxShadow: 'var(--shadow-sm)',
-                  border: isCurrentUser ? 'none' : '1px solid var(--border-light)',
+                  display: 'flex',
+                  justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
                 }}
               >
-                <p style={{ fontSize: '15px', lineHeight: '1.4', margin: 0 }}>
-                  {message.text}
-                </p>
                 <div
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'flex-end',
-                    gap: '4px',
-                    marginTop: '4px',
+                    maxWidth: '75%',
+                    padding: '12px 16px',
+                    borderRadius: '18px',
+                    background: isCurrentUser
+                      ? 'var(--gradient-primary)'
+                      : 'var(--surface)',
+                    color: isCurrentUser ? 'white' : 'var(--text-primary)',
+                    boxShadow: 'var(--shadow-sm)',
+                    border: isCurrentUser ? 'none' : '1px solid var(--border-light)',
                   }}
                 >
-                  <span
+                  <p style={{ fontSize: '15px', lineHeight: '1.4', margin: 0 }}>
+                    {messageText}
+                  </p>
+                  <div
                     style={{
-                      fontSize: '11px',
-                      opacity: 0.7,
-                      marginBottom: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      gap: '4px',
+                      marginTop: '4px',
                     }}
                   >
-                    {formatTime(message.timestamp)}
-                  </span>
-                  {isCurrentUser && (
-                    <CheckIcon
-                      size={12}
+                    <span
                       style={{
-                        opacity: message.read ? 1 : 0.5,
-                        color: message.read ? '#3b82f6' : 'currentColor',
+                        fontSize: '11px',
+                        opacity: 0.7,
+                        marginBottom: 0,
                       }}
-                    />
-                  )}
+                    >
+                      {formatTime(messageTimestamp)}
+                    </span>
+                    {isCurrentUser && (
+                      <CheckIcon
+                        size={12}
+                        style={{
+                          opacity: isRead ? 1 : 0.5,
+                          color: isRead ? '#3b82f6' : 'currentColor',
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
+            )
+          })
+        )}
+        
+        {/* Typing Indicator */}
+        {otherUserTyping && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div
+              style={{
+                padding: '12px 16px',
+                borderRadius: '18px',
+                background: 'var(--surface)',
+                border: '1px solid var(--border-light)',
+                color: 'var(--text-secondary)',
+                fontSize: '14px',
+                fontStyle: 'italic',
+              }}
+            >
+              typing...
             </div>
-          )
-        })}
+          </div>
+        )}
+        
         <div ref={messagesEndRef} />
       </div>
 
@@ -271,7 +458,7 @@ const Messages = ({ selectedMatchId, onBack }) => {
           type="submit"
           className="btn btn-primary"
           style={{ padding: '12px 24px', minWidth: 'auto' }}
-          disabled={!messageText.trim()}
+          disabled={!messageText.trim() || (useRealtime && !conversationId)}
         >
           Send
         </button>

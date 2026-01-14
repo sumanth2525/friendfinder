@@ -48,20 +48,18 @@ const Favorites = () => {
                     width: '70px',
                     height: '70px',
                     borderRadius: '50%',
-                    background: profile.photos?.[0] 
-                      ? `url(${profile.photos[0]}) center/cover`
-                      : 'var(--gradient-primary)',
+                    background: 'var(--gradient-primary)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: profile.photos?.[0] ? 'transparent' : 'white',
+                    color: 'white',
                     fontSize: '24px',
                     fontWeight: '700',
                     flexShrink: 0,
                     overflow: 'hidden',
                   }}
                 >
-                  {!profile.photos?.[0] && profile.name.charAt(0)}
+                  {profile.name.charAt(0)}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '4px' }}>

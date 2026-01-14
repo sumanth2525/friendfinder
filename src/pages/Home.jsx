@@ -1,81 +1,60 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { datingProfiles, matches as defaultMatches } from '../data/datingProfiles'
 import { trackActivity, ACTIVITY_TYPES } from '../utils/activityTracker'
-import { HeartIcon, StarIcon, UndoIcon } from '../components/Icons'
+import { HeartIcon, StarIcon, GroupsIcon } from '../components/Icons'
 import { saveMatches, getMatches, getUser, addFavoriteProfile, isFavoriteProfile, removeFavoriteProfile, addLikeSent, addLikeReceived } from '../utils/localStorage'
 import ProfilePreview from '../components/ProfilePreview'
+import { groupChatService } from '../services/groupChat'
 
-const Home = ({ onNavigateToMatches }) => {
+const Home = ({ onNavigateToMatches, onNavigateToGroups }) => {
   const [profiles, setProfiles] = useState([])
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [swipeDirection, setSwipeDirection] = useState(null)
-  const [startX, setStartX] = useState(0)
-  const [currentX, setCurrentX] = useState(0)
-  const [isDragging, setIsDragging] = useState(false)
-  const [startTime, setStartTime] = useState(0)
-  const [velocity, setVelocity] = useState(0)
-  const [photoIndex, setPhotoIndex] = useState(0)
-  const [swipeHistory, setSwipeHistory] = useState([])
-  const [photoStartX, setPhotoStartX] = useState(0)
-  const [photoCurrentX, setPhotoCurrentX] = useState(0)
-  const [isPhotoDragging, setIsPhotoDragging] = useState(false)
   const [showMatchAnimation, setShowMatchAnimation] = useState(false)
   const [matchedProfile, setMatchedProfile] = useState(null)
   const [isSuperLikeMatch, setIsSuperLikeMatch] = useState(false)
   const [favoriteState, setFavoriteState] = useState({})
   const [showProfilePreview, setShowProfilePreview] = useState(false)
   const [previewProfile, setPreviewProfile] = useState(null)
-  const cardRef = useRef(null)
+  const [viewMode, setViewMode] = useState('browse') // 'browse', 'matches', or 'groups'
   const user = getUser()
+  const [matchedProfiles, setMatchedProfiles] = useState([])
+  const [groups, setGroups] = useState([])
 
   // Initialize default matches if none exist
   useEffect(() => {
-    const currentMatches = getMatches()
-    if (currentMatches.length === 0) {
-      saveMatches(defaultMatches)
-    }
-  }, [])
-
-  useEffect(() => {
-    // Initialize default matches if none exist
     const currentMatches = getMatches()
     if (currentMatches.length === 0 && defaultMatches) {
       saveMatches(defaultMatches)
     }
   }, [])
 
-  // Keyboard shortcuts for faster swiping
-  useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (currentIndex >= profiles.length) return
-      
-      // Arrow keys or A/D for faster swiping
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-        e.preventDefault()
-        handleSwipe('left')
-      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-        e.preventDefault()
-        handleSwipe('right')
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyPress)
-    return () => window.removeEventListener('keydown', handleKeyPress)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, profiles.length])
 
   const [isLoading, setIsLoading] = useState(true)
 
+  // Cache localStorage reads to avoid repeated I/O
+  const [cachedPassedProfiles] = useState(() => {
+    try {
+      const passed = localStorage.getItem('friendfinder_passed')
+      return passed ? JSON.parse(passed) : []
+    } catch {
+      return []
+    }
+  })
+
+  const [cachedMatches] = useState(() => getMatches())
+
   useEffect(() => {
+    // Load matched profiles
+    const matches = getMatches()
+    const matchedProfileList = matches.map(m => m.profile || m).filter(Boolean)
+    setMatchedProfiles(matchedProfileList)
+    
     // Load profiles that haven't been matched or passed
     // Safety: Only show verified profiles to verified users
     setIsLoading(true)
-    const passedProfiles = getPassedProfiles()
-    const currentMatches = getMatches()
-    const matchedProfiles = currentMatches.map(m => m.profile?.id || m.id)
+    const matchedProfileIds = cachedMatches.map(m => m.profile?.id || m.id)
     const isUserVerified = user?.verified !== false // Default to true if not set
     const availableProfiles = datingProfiles.filter(
-      p => !passedProfiles.includes(p.id) && !matchedProfiles.includes(p.id) && (isUserVerified ? p.verified === true : true)
+      p => !cachedPassedProfiles.includes(p.id) && !matchedProfileIds.includes(p.id) && (isUserVerified ? p.verified === true : true)
     )
     // Simulate loading delay for better UX
     setTimeout(() => {
@@ -88,15 +67,18 @@ const Home = ({ onNavigateToMatches }) => {
       })
       setFavoriteState(favState)
     }, 300)
-  }, [currentIndex])
+
+    // Load groups
+    const loadGroups = async () => {
+      const userInterests = user?.interests || ['Music', 'Travel', 'Photography', 'Coffee', 'Reading', 'Art']
+      const { data } = await groupChatService.getGroupsForInterests(userInterests.slice(0, 6))
+      setGroups(data || [])
+    }
+    loadGroups()
+  }, [cachedPassedProfiles, cachedMatches, user?.verified, user?.interests])
 
   const getPassedProfiles = () => {
-    try {
-      const passed = localStorage.getItem('friendfinder_passed')
-      return passed ? JSON.parse(passed) : []
-    } catch {
-      return []
-    }
+    return cachedPassedProfiles
   }
 
   const savePassedProfile = (id) => {
@@ -121,33 +103,24 @@ const Home = ({ onNavigateToMatches }) => {
     return Math.max(60, Math.min(99, compatibility)) // Clamp between 60-99%
   }
 
-  const handleSwipe = (direction, isSuperLike = false) => {
-    if (currentIndex >= profiles.length) return
-
-    const profile = profiles[currentIndex]
-    
-    // Save to history for undo
-    setSwipeHistory(prev => [...prev, {
-      profile,
-      direction,
-      isSuperLike,
-      index: currentIndex,
-    }])
+  const handleSwipe = (direction, isSuperLike = false, profile = null) => {
+    const targetProfile = profile || profiles[0]
+    if (!targetProfile) return
     
     if (direction === 'right') {
       // Like or Super Like
       trackActivity(ACTIVITY_TYPES.FAVORITE_ADDED, {
-        id: profile.id,
-        title: profile.name,
+        id: targetProfile.id,
+        title: targetProfile.name,
         isSuperLike,
       })
       
       // Save like sent
-      addLikeSent(profile.id, profile)
+      addLikeSent(targetProfile.id, targetProfile)
       
       // Simulate receiving a like back (for demo - 20% chance)
       if (Math.random() > 0.8) {
-        addLikeReceived(profile.id, profile)
+        addLikeReceived(targetProfile.id, targetProfile)
       }
       
       // Check if it's a match (simplified - in real app, check if they liked you)
@@ -155,7 +128,7 @@ const Home = ({ onNavigateToMatches }) => {
       if (isMatch) {
         const newMatch = {
           id: Date.now(),
-          profile: profile,
+          profile: targetProfile,
           matchedAt: new Date().toISOString().split('T')[0],
           lastMessage: isSuperLike ? '⭐ Super Like! You matched!' : 'You matched! Start a conversation',
           lastMessageTime: 'Just now',
@@ -166,7 +139,7 @@ const Home = ({ onNavigateToMatches }) => {
         saveMatches([...currentMatches, newMatch])
         
         // Show match celebration animation
-        setMatchedProfile(profile)
+        setMatchedProfile(targetProfile)
         setIsSuperLikeMatch(isSuperLike)
         setShowMatchAnimation(true)
         
@@ -177,191 +150,18 @@ const Home = ({ onNavigateToMatches }) => {
       }
     } else {
       // Pass
-      savePassedProfile(profile.id)
+      savePassedProfile(targetProfile.id)
       trackActivity(ACTIVITY_TYPES.FAVORITE_REMOVED, {
-        id: profile.id,
-        title: profile.name,
+        id: targetProfile.id,
+        title: targetProfile.name,
       })
     }
 
-    setSwipeDirection(direction)
-    setPhotoIndex(0) // Reset photo index
-    // Faster animation - reduced from 300ms to 150ms
-    setTimeout(() => {
-      setCurrentIndex(prev => prev + 1)
-      setSwipeDirection(null)
-      setCurrentX(0)
-      setVelocity(0)
-    }, 150)
+    // Remove from list
+    setProfiles(prev => prev.filter(p => p.id !== targetProfile.id))
   }
 
-  const handleUndo = () => {
-    if (swipeHistory.length === 0) return
-    
-    const lastSwipe = swipeHistory[swipeHistory.length - 1]
-    setSwipeHistory(prev => prev.slice(0, -1))
-    
-    // Restore profile
-    setCurrentIndex(lastSwipe.index)
-    setCurrentX(0)
-    setPhotoIndex(0)
-    
-    // Remove from passed/matches if needed
-    if (lastSwipe.direction === 'right') {
-      const currentMatches = getMatches()
-      const filteredMatches = currentMatches.filter(m => 
-        (m.profile?.id || m.id) !== lastSwipe.profile.id
-      )
-      saveMatches(filteredMatches)
-    } else {
-      const passed = getPassedProfiles()
-      const filteredPassed = passed.filter(id => id !== lastSwipe.profile.id)
-      localStorage.setItem('friendfinder_passed', JSON.stringify(filteredPassed))
-    }
-  }
-
-  // Photo gallery swipe handlers
-  const handlePhotoTouchStart = (e) => {
-    e.stopPropagation()
-    setIsPhotoDragging(true)
-    setPhotoStartX(e.touches[0].clientX)
-  }
-
-  const handlePhotoTouchMove = (e) => {
-    if (!isPhotoDragging) return
-    e.stopPropagation()
-    setPhotoCurrentX(e.touches[0].clientX - photoStartX)
-  }
-
-  const handlePhotoTouchEnd = (e) => {
-    e.stopPropagation()
-    if (!isPhotoDragging) return
-    setIsPhotoDragging(false)
-    
-    const threshold = 50
-    const photos = currentProfile?.photos || []
-    
-    if (Math.abs(photoCurrentX) > threshold) {
-      if (photoCurrentX > 0 && photoIndex > 0) {
-        setPhotoIndex(prev => prev - 1)
-      } else if (photoCurrentX < 0 && photoIndex < photos.length - 1) {
-        setPhotoIndex(prev => prev + 1)
-      }
-    }
-    setPhotoCurrentX(0)
-  }
-
-  const handlePhotoMouseDown = (e) => {
-    e.stopPropagation()
-    setIsPhotoDragging(true)
-    setPhotoStartX(e.clientX)
-  }
-
-  const handlePhotoMouseMove = (e) => {
-    if (!isPhotoDragging) return
-    e.stopPropagation()
-    setPhotoCurrentX(e.clientX - photoStartX)
-  }
-
-  const handlePhotoMouseUp = (e) => {
-    e.stopPropagation()
-    if (!isPhotoDragging) return
-    setIsPhotoDragging(false)
-    
-    const threshold = 50
-    const photos = currentProfile?.photos || []
-    
-    if (Math.abs(photoCurrentX) > threshold) {
-      if (photoCurrentX > 0 && photoIndex > 0) {
-        setPhotoIndex(prev => prev - 1)
-      } else if (photoCurrentX < 0 && photoIndex < photos.length - 1) {
-        setPhotoIndex(prev => prev + 1)
-      }
-    }
-    setPhotoCurrentX(0)
-  }
-
-  const handleTouchStart = (e) => {
-    // Don't start card drag if we're interacting with photo gallery
-    if (e.target.closest('[data-photo-gallery]')) return
-    
-    setIsDragging(true)
-    const touchX = e.touches[0].clientX
-    setStartX(touchX)
-    setStartTime(Date.now())
-    setVelocity(0)
-  }
-
-  const handleTouchMove = (e) => {
-    if (!isDragging) return
-    // Don't move card if we're interacting with photo gallery
-    if (e.target.closest('[data-photo-gallery]')) {
-      setIsDragging(false)
-      return
-    }
-    
-    const x = e.touches[0].clientX
-    const deltaX = x - startX
-    const deltaTime = Date.now() - startTime
-    const currentVelocity = Math.abs(deltaX / deltaTime) * 1000 // pixels per second
-    
-    setCurrentX(deltaX)
-    setVelocity(currentVelocity)
-  }
-
-  const handleTouchEnd = () => {
-    if (!isDragging) return
-    setIsDragging(false)
-
-    // Reduced threshold from 100px to 60px for faster swiping
-    // Also check velocity - fast swipes trigger even with less distance
-    const threshold = 60
-    const velocityThreshold = 500 // pixels per second
-    
-    if (Math.abs(currentX) > threshold || Math.abs(velocity) > velocityThreshold) {
-      handleSwipe(currentX > 0 ? 'right' : 'left')
-    } else {
-      // Snap back faster
-      setCurrentX(0)
-    }
-    setVelocity(0)
-  }
-
-  const handleMouseDown = (e) => {
-    setIsDragging(true)
-    const mouseX = e.clientX
-    setStartX(mouseX)
-    setStartTime(Date.now())
-    setVelocity(0)
-  }
-
-  const handleMouseMove = (e) => {
-    if (!isDragging) return
-    const deltaX = e.clientX - startX
-    const deltaTime = Date.now() - startTime
-    const currentVelocity = Math.abs(deltaX / deltaTime) * 1000 // pixels per second
-    
-    setCurrentX(deltaX)
-    setVelocity(currentVelocity)
-  }
-
-  const handleMouseUp = () => {
-    if (!isDragging) return
-    setIsDragging(false)
-
-    // Reduced threshold and velocity-based detection
-    const threshold = 60
-    const velocityThreshold = 500
-    
-    if (Math.abs(currentX) > threshold || Math.abs(velocity) > velocityThreshold) {
-      handleSwipe(currentX > 0 ? 'right' : 'left')
-    } else {
-      setCurrentX(0)
-    }
-    setVelocity(0)
-  }
-
-  if (currentIndex >= profiles.length) {
+  if (profiles.length === 0 && !isLoading) {
     return (
       <div style={{ 
         textAlign: 'center', 
@@ -404,25 +204,9 @@ const Home = ({ onNavigateToMatches }) => {
           You've seen everyone in your area. Check back later for new profiles!
         </p>
         <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-          {swipeHistory.length > 0 && (
-            <button
-              className="btn"
-              onClick={handleUndo}
-              style={{
-                background: 'white',
-                color: 'var(--text-primary)',
-                border: '2px solid var(--border)',
-              }}
-            >
-              <UndoIcon size={18} style={{ marginRight: '8px', display: 'inline-block', verticalAlign: 'middle' }} />
-              Undo Last Swipe
-            </button>
-          )}
           <button
             className="btn btn-primary"
             onClick={() => {
-              setCurrentIndex(0)
-              setPhotoIndex(0)
               const passedProfiles = getPassedProfiles()
               const currentMatches = getMatches()
               const matchedProfiles = currentMatches.map(m => m.profile?.id || m.id)
@@ -513,39 +297,25 @@ const Home = ({ onNavigateToMatches }) => {
     )
   }
 
-  const currentProfile = profiles[currentIndex]
-  if (!currentProfile) return null
-
-  // More responsive rotation and opacity
-  const rotation = currentX * 0.15 // Increased rotation for better feedback
-  const opacity = Math.max(0.3, 1 - Math.abs(currentX) / 200) // Faster fade
-  const compatibility = calculateCompatibility(currentProfile)
-  const isUserVerified = user?.verified !== false
-  // Safety: Only show photos if profile is verified
-  const canShowPhotos = currentProfile.verified === true && isUserVerified
-  const photos = canShowPhotos ? (currentProfile.photos || []) : []
-  // Show only first photo if multiple exist
-  const displayPhoto = photos.length > 0 ? photos[0] : null
-  const currentPhoto = displayPhoto
-
-  const handleProfileClick = () => {
-    setPreviewProfile(currentProfile)
-    setShowProfilePreview(true)
-  }
-
   const handlePreviewLike = () => {
-    handleSwipe('right', false)
-    setShowProfilePreview(false)
+    if (previewProfile) {
+      handleSwipe('right', false, previewProfile)
+      setShowProfilePreview(false)
+    }
   }
 
   const handlePreviewSuperLike = () => {
-    handleSwipe('right', true)
-    setShowProfilePreview(false)
+    if (previewProfile) {
+      handleSwipe('right', true, previewProfile)
+      setShowProfilePreview(false)
+    }
   }
 
   const handlePreviewPass = () => {
-    handleSwipe('left')
-    setShowProfilePreview(false)
+    if (previewProfile) {
+      handleSwipe('left', false, previewProfile)
+      setShowProfilePreview(false)
+    }
   }
 
   return (
@@ -715,15 +485,13 @@ const Home = ({ onNavigateToMatches }) => {
                 💖
               </div>
 
-              {/* Matched Profile Photo */}
+              {/* Matched Profile Avatar */}
               <div
                 style={{
                   width: '80px',
                   height: '80px',
                   borderRadius: '50%',
-                  background: matchedProfile.photos?.[0] 
-                    ? `url(${matchedProfile.photos[0]}) center/cover`
-                    : 'rgba(255, 255, 255, 0.3)',
+                  background: 'rgba(255, 255, 255, 0.3)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -732,10 +500,10 @@ const Home = ({ onNavigateToMatches }) => {
                   border: '4px solid white',
                   boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
                   animation: 'bounceIn 0.6s ease 0.3s both',
-                  color: matchedProfile.photos?.[0] ? 'transparent' : 'white',
+                  color: 'white',
                 }}
               >
-                {!matchedProfile.photos?.[0] && matchedProfile.name.charAt(0)}
+                {matchedProfile.name.charAt(0)}
               </div>
             </div>
 
@@ -780,386 +548,507 @@ const Home = ({ onNavigateToMatches }) => {
         </div>
       )}
 
-      <div style={{ position: 'relative', height: 'calc(100vh - 200px)', minHeight: '600px' }}>
-      {/* Undo Button */}
-      {swipeHistory.length > 0 && (
+      {/* View Toggle */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'flex-end', 
+        marginBottom: '16px',
+        gap: '8px',
+        flexWrap: 'wrap'
+      }}>
         <button
-          onClick={handleUndo}
+          onClick={() => setViewMode('browse')}
           style={{
-            position: 'absolute',
-            top: '20px',
-            right: '20px',
-            zIndex: 20,
-            width: '48px',
-            height: '48px',
-            borderRadius: '50%',
+            padding: '8px 16px',
+            borderRadius: '8px',
             border: 'none',
-            background: 'rgba(255, 255, 255, 0.95)',
-            boxShadow: 'var(--shadow-lg)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            background: viewMode === 'browse' ? 'var(--gradient-primary)' : 'var(--border-light)',
+            color: viewMode === 'browse' ? 'white' : 'var(--text-primary)',
+            fontSize: '14px',
+            fontWeight: '600',
             cursor: 'pointer',
-            color: 'var(--text-primary)',
-            transition: 'transform 0.1s',
-            WebkitTapHighlightColor: 'transparent',
-            backdropFilter: 'blur(10px)',
+            transition: 'all 0.2s',
           }}
-          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.9)'}
-          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-          <UndoIcon size={20} />
-        </button>
-      )}
-
-      {/* Action Buttons */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          display: 'flex',
-          gap: '12px',
-          zIndex: 10,
-          alignItems: 'center',
-        }}
-      >
-        <button
-          onClick={() => handleSwipe('left')}
-          onTouchStart={(e) => {
-            e.preventDefault()
-            handleSwipe('left')
-          }}
-          style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            border: 'none',
-            background: 'white',
-            boxShadow: 'var(--shadow-lg)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            fontSize: '24px',
-            transition: 'transform 0.1s',
-            WebkitTapHighlightColor: 'transparent',
-          }}
-          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.9)'}
-          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-        >
-          ✕
+          Browse
         </button>
         <button
-          onClick={() => handleSwipe('right', true)}
-          onTouchStart={(e) => {
-            e.preventDefault()
-            handleSwipe('right', true)
-          }}
+          onClick={() => setViewMode('groups')}
           style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '50%',
+            padding: '8px 16px',
+            borderRadius: '8px',
             border: 'none',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            boxShadow: 'var(--shadow-lg)',
+            background: viewMode === 'groups' ? 'var(--gradient-primary)' : 'var(--border-light)',
+            color: viewMode === 'groups' ? 'white' : 'var(--text-primary)',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            color: 'white',
-            transition: 'transform 0.1s',
-            WebkitTapHighlightColor: 'transparent',
+            gap: '6px'
           }}
-          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.9)'}
-          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          title="Super Like"
         >
-          <StarIcon size={22} filled={true} />
+          <GroupsIcon size={16} />
+          Groups
         </button>
         <button
-          onClick={() => handleSwipe('right')}
-          onTouchStart={(e) => {
-            e.preventDefault()
-            handleSwipe('right')
-          }}
+          onClick={() => setViewMode('matches')}
           style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
+            padding: '8px 16px',
+            borderRadius: '8px',
             border: 'none',
-            background: 'var(--gradient-primary)',
-            boxShadow: 'var(--shadow-lg)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            background: viewMode === 'matches' ? 'var(--gradient-primary)' : 'var(--border-light)',
+            color: viewMode === 'matches' ? 'white' : 'var(--text-primary)',
+            fontSize: '14px',
+            fontWeight: '600',
             cursor: 'pointer',
-            color: 'white',
-            transition: 'transform 0.1s',
-            WebkitTapHighlightColor: 'transparent',
+            transition: 'all 0.2s',
+            position: 'relative'
           }}
-          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.9)'}
-          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
         >
-          <HeartIcon size={28} filled={true} />
+          Matches
+          {matchedProfiles.length > 0 && (
+            <span style={{
+              position: 'absolute',
+              top: '-4px',
+              right: '-4px',
+              background: 'var(--error)',
+              color: 'white',
+              borderRadius: '50%',
+              width: '18px',
+              height: '18px',
+              fontSize: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '700'
+            }}>
+              {matchedProfiles.length}
+            </span>
+          )}
         </button>
       </div>
 
-      {/* Profile Card */}
-      <div
-        ref={cardRef}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        style={{
-          position: 'absolute',
-          width: '100%',
-          maxWidth: '100%',
-          height: 'calc(100vh - 250px)',
-          maxHeight: '700px',
-          transform: `translateX(${currentX}px) rotate(${rotation}deg) scale(${isDragging ? 0.98 : 1})`,
-          opacity: opacity,
-          transition: swipeDirection ? 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)' : 'transform 0.1s, opacity 0.1s',
-          cursor: isDragging ? 'grabbing' : 'grab',
-          userSelect: 'none',
-          willChange: 'transform',
-          touchAction: 'pan-y',
-        }}
-      >
-        <div
-          className="card"
-          style={{
-            height: '100%',
-            padding: 0,
-            overflow: 'hidden',
-            position: 'relative',
-            background: 'var(--gradient-card)',
-          }}
-        >
-          {/* Photo Gallery - Hidden until click, show placeholder */}
-          <div
-            data-photo-gallery
-            style={{
-              width: '100%',
-              height: '70%',
-              position: 'relative',
-              overflow: 'hidden',
-              background: 'var(--gradient-card)',
-              cursor: 'pointer',
-            }}
-            onClick={handleProfileClick}
-          >
-            {/* Show placeholder initially - no images until user clicks */}
-            <div
-              style={{
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'column',
-                color: 'white',
-                background: 'var(--gradient-card)',
-                position: 'relative',
-              }}
-            >
+      {/* Browse Mode - Grid View */}
+      {viewMode === 'browse' && (
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', 
+          gap: '16px',
+          paddingBottom: '80px'
+        }}>
+          {profiles.slice(0, 20).map((profile) => {
+            const isFav = favoriteState[profile.id] || isFavoriteProfile(profile.id)
+            const compatibility = calculateCompatibility(profile)
+
+            return (
               <div
+                key={profile.id}
+                className="card"
                 style={{
-                  width: '120px',
-                  height: '120px',
-                  borderRadius: '50%',
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '64px',
-                  fontWeight: '700',
-                  marginBottom: '16px',
-                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+                  padding: 0,
+                  overflow: 'hidden',
+                  cursor: 'pointer',
+                  position: 'relative',
+                }}
+                onClick={() => {
+                  setPreviewProfile(profile)
+                  setShowProfilePreview(true)
                 }}
               >
-                {currentProfile.name.charAt(0)}
-              </div>
-              <p style={{ fontSize: '16px', opacity: 0.9, fontWeight: '500' }}>
-                {currentProfile.name}, {currentProfile.age}
-              </p>
-              <p style={{ fontSize: '14px', opacity: 0.7, marginTop: '8px' }}>
-                Tap to view profile
-              </p>
-              {!canShowPhotos && (
-                <p style={{ fontSize: '12px', opacity: 0.6, marginTop: '8px', fontStyle: 'italic' }}>
-                  Verification pending
-                </p>
-              )}
-            </div>
-
-            {/* Photo Indicators - Hidden since we show placeholder */}
-
-            {/* Compatibility Score */}
-            <div
-              style={{
-                position: 'absolute',
-                top: '16px',
-                right: '16px',
-                background: 'rgba(255, 255, 255, 0.95)',
-                backdropFilter: 'blur(10px)',
-                borderRadius: '20px',
-                padding: '8px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: 'var(--shadow)',
-                zIndex: 5,
-              }}
-            >
-              <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>
-                {compatibility}% Match
-              </span>
-            </div>
-
-            {/* Favorite Button */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                const isFav = favoriteState[currentProfile.id] || isFavoriteProfile(currentProfile.id)
-                if (isFav) {
-                  removeFavoriteProfile(currentProfile.id)
-                  setFavoriteState(prev => ({ ...prev, [currentProfile.id]: false }))
-                } else {
-                  addFavoriteProfile(currentProfile)
-                  setFavoriteState(prev => ({ ...prev, [currentProfile.id]: true }))
-                }
-              }}
-              style={{
-                position: 'absolute',
-                top: '16px',
-                left: '60px',
-                zIndex: 5,
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                border: 'none',
-                background: (favoriteState[currentProfile.id] || isFavoriteProfile(currentProfile.id))
-                  ? 'rgba(255, 215, 0, 0.95)' 
-                  : 'rgba(255, 255, 255, 0.95)',
-                backdropFilter: 'blur(10px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: 'var(--shadow)',
-                transition: 'transform 0.2s',
-              }}
-              onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.9)'}
-              onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              title={(favoriteState[currentProfile.id] || isFavoriteProfile(currentProfile.id)) ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              <StarIcon 
-                size={20} 
-                filled={favoriteState[currentProfile.id] || isFavoriteProfile(currentProfile.id)}
-                style={{ color: (favoriteState[currentProfile.id] || isFavoriteProfile(currentProfile.id)) ? '#ff6b6b' : 'var(--text-primary)' }}
-              />
-            </button>
-
-            {/* Verified Badge */}
-            {currentProfile.verified && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '16px',
-                  left: '16px',
-                  background: 'var(--info)',
-                  borderRadius: '50%',
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: 'var(--shadow)',
-                  zIndex: 5,
-                }}
-              >
-                <span style={{ color: 'white', fontSize: '18px', fontWeight: '700' }}>✓</span>
-              </div>
-            )}
-
-            {/* Online Status */}
-            {currentProfile.online && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: currentProfile.verified ? '56px' : '16px',
-                  left: '16px',
-                  background: 'var(--success)',
-                  color: 'white',
-                  padding: '6px 12px',
-                  borderRadius: '16px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  boxShadow: 'var(--shadow)',
-                  zIndex: 5,
-                }}
-              >
-                Online
-              </div>
-            )}
-          </div>
-
-          {/* Info */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
-              padding: '24px 20px',
-              color: 'white',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-              <div>
-                <h2 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '4px' }}>
-                  {currentProfile.name}, {currentProfile.age}
-                </h2>
-                <p style={{ fontSize: '14px', opacity: 0.9 }}>
-                  {currentProfile.distance} miles away · {currentProfile.location}
-                </p>
-              </div>
-            </div>
-            <p style={{ fontSize: '15px', marginBottom: '12px', lineHeight: '1.4' }}>
-              {currentProfile.bio}
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-              {currentProfile.interests.slice(0, 4).map((interest, idx) => (
-                <span
-                  key={idx}
+                {/* Avatar */}
+                <div
                   style={{
-                    padding: '6px 12px',
-                    background: 'rgba(255, 255, 255, 0.2)',
-                    borderRadius: '16px',
-                    fontSize: '12px',
-                    fontWeight: '500',
-                    backdropFilter: 'blur(10px)',
+                    width: '100%',
+                    height: '200px',
+                    background: 'var(--gradient-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '48px',
+                    fontWeight: '700',
+                    color: 'white',
+                    position: 'relative',
                   }}
                 >
-                  {interest}
-                </span>
+                  {profile.name.charAt(0)}
+                  
+                  {/* Compatibility Badge */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '8px',
+                      right: '8px',
+                      background: 'rgba(255, 255, 255, 0.9)',
+                      borderRadius: '12px',
+                      padding: '4px 8px',
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      color: 'var(--primary-color)',
+                    }}
+                  >
+                    {compatibility}%
+                  </div>
+
+                  {/* Favorite Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (isFav) {
+                        removeFavoriteProfile(profile.id)
+                        setFavoriteState(prev => ({ ...prev, [profile.id]: false }))
+                      } else {
+                        addFavoriteProfile(profile)
+                        setFavoriteState(prev => ({ ...prev, [profile.id]: true }))
+                      }
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: '8px',
+                      left: '8px',
+                      background: 'rgba(255, 255, 255, 0.9)',
+                      borderRadius: '50%',
+                      width: '32px',
+                      height: '32px',
+                      border: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <StarIcon size={16} filled={isFav} />
+                  </button>
+                </div>
+
+                {/* Info */}
+                <div style={{ padding: '12px' }}>
+                  <h3 style={{ 
+                    fontSize: '16px', 
+                    fontWeight: '600', 
+                    marginBottom: '4px',
+                    color: 'var(--text-primary)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}>
+                    {profile.name}, {profile.age}
+                  </h3>
+                  <p style={{ 
+                    fontSize: '12px', 
+                    color: 'var(--text-secondary)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}>
+                    {profile.location}
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div style={{ 
+                  display: 'flex', 
+                  gap: '8px', 
+                  padding: '0 12px 12px 12px'
+                }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleSwipe('left', false, profile)
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-light)',
+                      background: 'white',
+                      color: 'var(--text-primary)',
+                      fontSize: '20px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✕
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleSwipe('right', false, profile)
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: 'var(--gradient-primary)',
+                      color: 'white',
+                      fontSize: '20px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ❤️
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Matches View */}
+      {viewMode === 'matches' && (
+        <div>
+          {matchedProfiles.length > 0 ? (
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+              gap: '20px',
+              paddingBottom: '80px'
+            }}>
+              {matchedProfiles.map((profile) => {
+                const compatibility = calculateCompatibility(profile)
+                const match = cachedMatches.find(m => (m.profile?.id || m.id) === profile.id)
+                
+                return (
+                  <div
+                    key={profile.id}
+                    className="card"
+                    style={{
+                      padding: 0,
+                      overflow: 'hidden',
+                      cursor: 'pointer',
+                      transition: 'transform 0.2s, box-shadow 0.2s',
+                      border: '2px solid var(--primary-color)'
+                    }}
+                    onClick={() => {
+                      setPreviewProfile(profile)
+                      setShowProfilePreview(true)
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-4px)'
+                      e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)'
+                      e.currentTarget.style.boxShadow = 'var(--shadow)'
+                    }}
+                  >
+                    <div style={{
+                      width: '100%',
+                      height: '300px',
+                      position: 'relative',
+                      background: 'var(--gradient-primary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '64px',
+                      fontWeight: '700',
+                      color: 'white'
+                    }}>
+                      {profile.name.charAt(0)}
+                      <div style={{
+                        position: 'absolute',
+                        top: '12px',
+                        left: '12px',
+                        display: 'flex',
+                        gap: '8px'
+                      }}>
+                        {profile.verified && (
+                          <div style={{
+                            padding: '4px 8px',
+                            background: 'rgba(255, 255, 255, 0.9)',
+                            borderRadius: '12px',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                            color: 'var(--info)'
+                          }}>✓ Verified</div>
+                        )}
+                        {profile.online && (
+                          <div style={{
+                            padding: '4px 8px',
+                            background: 'rgba(255, 255, 255, 0.9)',
+                            borderRadius: '12px',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                            color: 'var(--success)'
+                          }}>🟢 Online</div>
+                        )}
+                      </div>
+                      <div style={{
+                        position: 'absolute',
+                        top: '12px',
+                        right: '12px',
+                        padding: '6px 12px',
+                        background: 'rgba(255, 255, 255, 0.9)',
+                        borderRadius: '12px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        color: 'var(--primary-color)'
+                      }}>
+                        {compatibility}% Match
+                      </div>
+                      {match?.isSuperLike && (
+                        <div style={{
+                          position: 'absolute',
+                          bottom: '12px',
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          padding: '6px 12px',
+                          background: 'rgba(255, 215, 0, 0.95)',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          color: 'var(--text-primary)'
+                        }}>
+                          ⭐ Super Like Match!
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ padding: '16px' }}>
+                      <h4 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '4px', color: 'var(--text-primary)' }}>
+                        {profile.name}, {profile.age}
+                      </h4>
+                      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                        📍 {profile.distance} miles away · {profile.location}
+                      </p>
+                      <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: '1.4' }}>
+                        {profile.bio?.substring(0, 100)}{profile.bio?.length > 100 ? '...' : ''}
+                      </p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                        {profile.interests?.slice(0, 3).map((interest, idx) => (
+                          <span
+                            key={idx}
+                            style={{
+                              padding: '4px 10px',
+                              background: 'var(--primary-50)',
+                              color: 'var(--primary-color)',
+                              borderRadius: '12px',
+                              fontSize: '11px',
+                              fontWeight: '500',
+                            }}
+                          >
+                            {interest}
+                          </span>
+                        ))}
+                      </div>
+                      <button
+                        className="btn btn-primary"
+                        style={{ width: '100%' }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (onNavigateToMatches) {
+                            onNavigateToMatches()
+                          }
+                        }}
+                      >
+                        Send Message
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="empty-state" style={{ padding: '80px 20px', textAlign: 'center' }}>
+              <div style={{ fontSize: '64px', marginBottom: '24px' }}>💔</div>
+              <h2 style={{ fontSize: '24px', fontWeight: '700', marginBottom: '12px', color: 'var(--text-primary)' }}>
+                No Matches Yet
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '16px', marginBottom: '24px' }}>
+                Start browsing to find your perfect match!
+              </p>
+              <button
+                className="btn btn-primary"
+                onClick={() => setViewMode('browse')}
+              >
+                Start Browsing
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Groups View */}
+      {viewMode === 'groups' && (
+        <div>
+          {groups.length > 0 ? (
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+              gap: '20px',
+              paddingBottom: '80px'
+            }}>
+              {groups.slice(0, 6).map((group) => (
+                <div
+                  key={group.id}
+                  className="card"
+                  style={{
+                    padding: 0,
+                    overflow: 'hidden',
+                    cursor: 'pointer',
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                  }}
+                  onClick={() => {
+                    if (onNavigateToGroups) {
+                      onNavigateToGroups()
+                    }
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-4px)'
+                    e.currentTarget.style.boxShadow = 'var(--shadow-lg)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.boxShadow = 'var(--shadow)'
+                  }}
+                >
+                  <div style={{
+                    width: '100%',
+                    height: '200px',
+                    position: 'relative',
+                    background: 'var(--gradient-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '64px',
+                    fontWeight: '700',
+                    color: 'white'
+                  }}>
+                    {group.hobby?.charAt(0) || 'G'}
+                  </div>
+                  <div style={{ padding: '16px' }}>
+                    <h4 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '4px', color: 'var(--text-primary)' }}>
+                      {group.name || group.hobby}
+                    </h4>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                      {group.description || `Connect with people who love ${group.hobby}`}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        👥 {group.member_count || 0} members
+                      </span>
+                      <span style={{ fontSize: '12px', color: 'var(--primary-color)', fontWeight: '600' }}>
+                        Join Chat →
+                      </span>
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
+          ) : (
+            <div className="empty-state" style={{ padding: '80px 20px', textAlign: 'center' }}>
+              <div style={{ fontSize: '64px', marginBottom: '24px' }}>💬</div>
+              <h2 style={{ fontSize: '24px', fontWeight: '700', marginBottom: '12px', color: 'var(--text-primary)' }}>
+                No Groups Yet
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '16px', marginBottom: '24px' }}>
+                Add interests to your profile to see groups!
+              </p>
+            </div>
+          )}
         </div>
-        </div>
-      </div>
+      )}
+
 
       {/* Profile Preview Modal */}
       {showProfilePreview && previewProfile && (

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Connection Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 600px;
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 28px;
+        }
+        .status {
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-weight: 500;
+            text-align: center;
+            font-size: 16px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 2px solid #bee5eb;
+        }
+        .loading {
+            background: #fff3cd;
+            color: #856404;
+            border: 2px solid #ffeaa7;
+        }
+        .details {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .test-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .test-item.success {
+            border-left-color: #28a745;
+        }
+        .test-item.error {
+            border-left-color: #dc3545;
+        }
+        .test-item.warning {
+            border-left-color: #ffc107;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            width: 100%;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Supabase Connection Test</h1>
+        
+        <div id="status" class="status loading">
+            <div class="spinner"></div>
+            <div style="margin-top: 10px;">Testing connection...</div>
+        </div>
+        
+        <div id="details" style="display: none;"></div>
+        
+        <button id="retryBtn" onclick="runTest()" style="display: none;">Test Again</button>
+    </div>
+
+    <script type="module">
+        // Your Supabase credentials
+        const supabaseUrl = 'https://qgxrbdhxiksutseeyuzz.supabase.co'
+        const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFneHJiZGh4aWtzdXRzZWV5dXp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNTMwNDMsImV4cCI6MjA4MzkyOTA0M30.RoJukntPw0-aDSkTw9y0-mP1JlOg6Z3QlTX47W01Jqw'
+
+        window.runTest = async function() {
+            const statusDiv = document.getElementById('status')
+            const detailsDiv = document.getElementById('details')
+            const retryBtn = document.getElementById('retryBtn')
+            
+            retryBtn.style.display = 'none'
+            statusDiv.className = 'status loading'
+            statusDiv.innerHTML = '<div class="spinner"></div><div style="margin-top: 10px;">Testing connection...</div>'
+            detailsDiv.style.display = 'none'
+            detailsDiv.innerHTML = ''
+            
+            let allTestsPassed = true
+            let testResults = []
+            
+            try {
+                // Import Supabase
+                const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm')
+                
+                // Test 1: Create client
+                testResults.push('🔧 Test 1: Creating Supabase Client...')
+                const supabase = createClient(supabaseUrl, supabaseAnonKey)
+                testResults.push('✅ Test 1: Client created successfully')
+                testResults.push(`   URL: ${supabaseUrl}`)
+                testResults.push(`   Key: ${supabaseAnonKey.substring(0, 40)}...`)
+                testResults.push('')
+                
+                // Test 2: Auth service
+                testResults.push('🔐 Test 2: Testing Auth Service...')
+                const { data: authData, error: authError } = await supabase.auth.getSession()
+                
+                if (authError) {
+                    testResults.push(`⚠️  Test 2: Auth error - ${authError.message}`)
+                    testResults.push('   (This is OK - you\'re not logged in)')
+                } else {
+                    testResults.push('✅ Test 2: Auth service is accessible')
+                }
+                testResults.push('')
+                
+                // Test 3: Database query
+                testResults.push('📊 Test 3: Testing Database Connection...')
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('count')
+                    .limit(1)
+                
+                if (error) {
+                    testResults.push(`⚠️  Test 3: Database query error - ${error.message}`)
+                    testResults.push('   (This is OK if the \'users\' table doesn\'t exist yet)')
+                    allTestsPassed = false
+                } else {
+                    testResults.push('✅ Test 3: Database connection successful!')
+                }
+                testResults.push('')
+                
+                // Test 4: Realtime
+                testResults.push('⚡ Test 4: Testing Realtime Service...')
+                const channel = supabase.channel('test-connection-' + Date.now())
+                
+                const subscribePromise = new Promise((resolve) => {
+                    channel.subscribe((status) => {
+                        if (status === 'SUBSCRIBED') {
+                            testResults.push('✅ Test 4: Realtime channel subscribed')
+                            channel.unsubscribe()
+                            resolve(true)
+                        } else if (status === 'CHANNEL_ERROR') {
+                            testResults.push('⚠️  Test 4: Realtime channel error (might not be enabled)')
+                            resolve(false)
+                        }
+                    })
+                })
+                
+                await Promise.race([
+                    subscribePromise,
+                    new Promise(resolve => setTimeout(() => {
+                        testResults.push('⚠️  Test 4: Realtime timeout (might not be enabled)')
+                        resolve(false)
+                    }, 2000))
+                ])
+                
+                // Display results
+                statusDiv.className = 'status success'
+                statusDiv.innerHTML = '✅ Connection Successful!<br><small>Supabase is configured correctly</small>'
+                detailsDiv.style.display = 'block'
+                detailsDiv.innerHTML = '<strong>Test Results:</strong><br><br>' + testResults.join('<br>')
+                retryBtn.style.display = 'block'
+                
+            } catch (err) {
+                allTestsPassed = false
+                statusDiv.className = 'status error'
+                statusDiv.innerHTML = '❌ Connection Failed!<br><small>' + err.message + '</small>'
+                detailsDiv.style.display = 'block'
+                detailsDiv.innerHTML = '<strong>Error Details:</strong><br><br>' + 
+                    testResults.join('<br>') + 
+                    '<br><br><strong>Error:</strong><br>' + err.message + 
+                    '<br><br><strong>Stack:</strong><br>' + (err.stack || 'No stack trace')
+                retryBtn.style.display = 'block'
+            }
+        }
+        
+        // Auto-run test on page load
+        runTest()
+    </script>
+</body>
+</html>

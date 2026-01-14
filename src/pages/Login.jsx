@@ -7,6 +7,7 @@ import {
   getUserByEmail 
 } from '../data/mockData'
 import { PhoneIcon, MailIcon } from '../components/Icons'
+import { adminService } from '../services/adminService'
 
 const Login = ({ onLogin, onSwitchToSignUp }) => {
   const [loginMethod, setLoginMethod] = useState('phone') // 'phone' or 'email'
@@ -54,8 +55,26 @@ const Login = ({ onLogin, onSwitchToSignUp }) => {
     }, 1000)
   }
 
+  // Track login attempt
+  const trackAttempt = async (email, phone, success, failureReason, userId = null) => {
+    try {
+      await adminService.trackLoginAttempt({
+        email: email || null,
+        phone: phone || null,
+        ipAddress: null, // Could get from request headers in production
+        userAgent: navigator.userAgent,
+        success,
+        failureReason: failureReason || null,
+        userId
+      })
+    } catch (error) {
+      console.error('Error tracking login attempt:', error)
+      // Don't block login if tracking fails
+    }
+  }
+
   // Handle OTP verification
-  const handleVerifyOTP = (e) => {
+  const handleVerifyOTP = async (e) => {
     e.preventDefault()
     if (!otp || otp.length !== 6) {
       setOtpError('Please enter a valid 6-digit OTP')
@@ -64,7 +83,7 @@ const Login = ({ onLogin, onSwitchToSignUp }) => {
 
     setIsLoading(true)
     // Simulate API call
-    setTimeout(() => {
+    setTimeout(async () => {
       const isValid = verifyOTP(phone, otp)
       if (isValid) {
         const user = getUserByPhone(phone) || {
@@ -72,9 +91,11 @@ const Login = ({ onLogin, onSwitchToSignUp }) => {
           phone,
           email: `${phone.replace(/\D/g, '')}@friendfinder.com`,
         }
+        await trackAttempt(null, phone, true, null, user.id)
         setIsLoading(false)
         onLogin(user)
       } else {
+        await trackAttempt(null, phone, false, 'Invalid OTP')
         setOtpError('Invalid OTP. Please try again.')
         setIsLoading(false)
       }
@@ -82,18 +103,26 @@ const Login = ({ onLogin, onSwitchToSignUp }) => {
   }
 
   // Handle email/password login
-  const handleEmailLogin = (e) => {
+  const handleEmailLogin = async (e) => {
     e.preventDefault()
     setIsLoading(true)
     
-    setTimeout(() => {
+    setTimeout(async () => {
       const user = getUserByEmail(email) || {
         name: email.split('@')[0] || 'User',
         email,
         phone: '+1 000-000-0000',
       }
-      setIsLoading(false)
-      onLogin(user)
+      
+      if (user.email === email) {
+        await trackAttempt(email, null, true, null, user.id)
+        setIsLoading(false)
+        onLogin(user)
+      } else {
+        await trackAttempt(email, null, false, 'Invalid credentials')
+        setIsLoading(false)
+        alert('Invalid email or password')
+      }
     }, 1000)
   }
 

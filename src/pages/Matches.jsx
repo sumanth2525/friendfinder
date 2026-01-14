@@ -1,34 +1,73 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { getMatches, blockUser, isBlocked, getLikesSent, getLikesReceived } from '../utils/localStorage'
-import { formatLastActive } from '../utils/timeUtils'
+import { formatLastActive, formatTime } from '../utils/timeUtils'
 import { FlagIcon, BanIcon } from '../components/Icons'
+import { debounce } from '../utils/performance'
 
 const Matches = ({ onSelectMatch }) => {
   const [activeTab, setActiveTab] = useState('matches') // 'likesSent', 'likesReceived', 'matches'
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [matches, setMatches] = useState([])
   const [likesSent, setLikesSent] = useState([])
   const [likesReceived, setLikesReceived] = useState([])
 
+  // Cache localStorage reads on mount
   useEffect(() => {
     const savedMatches = getMatches()
     // Filter out blocked users
-    const filtered = savedMatches.filter(m => !isBlocked(m.profile.id))
+    const filtered = savedMatches.filter(m => m.profile && !isBlocked(m.profile.id))
     setMatches(filtered)
+    
+    // Load likes sent and received
+    const sent = getLikesSent()
+    const received = getLikesReceived()
+    
+    // Filter out blocked users from likes
+    const filteredSent = sent.filter(item => {
+      const profileId = item.profileId || item.profile?.id
+      return profileId && !isBlocked(profileId)
+    })
+    const filteredReceived = received.filter(item => {
+      const profileId = item.profileId || item.profile?.id
+      return profileId && !isBlocked(profileId)
+    })
+    
+    setLikesSent(filteredSent)
+    setLikesReceived(filteredReceived)
   }, [])
 
-  const getCurrentList = () => {
+  // Debounce search query for better performance
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Memoize current list selection
+  const getCurrentList = useCallback(() => {
     if (activeTab === 'likesSent') return likesSent
     if (activeTab === 'likesReceived') return likesReceived
     return matches
-  }
+  }, [activeTab, likesSent, likesReceived, matches])
 
-  const filteredList = getCurrentList().filter(item => {
-    const name = activeTab === 'matches' 
-      ? item.profile?.name || item.name || ''
-      : item.profile?.name || ''
-    return name.toLowerCase().includes(searchQuery.toLowerCase())
-  })
+  // Memoize filtered list to avoid re-filtering on every render
+  const filteredList = useMemo(() => {
+    const list = getCurrentList()
+    if (!debouncedSearchQuery) return list
+    
+    return list.filter(item => {
+      let name = ''
+      if (activeTab === 'matches') {
+        name = item.profile?.name || item.name || ''
+      } else {
+        // For likes sent/received, item has structure: { profileId, profile, timestamp }
+        name = item.profile?.name || ''
+      }
+      return name.toLowerCase().includes(debouncedSearchQuery.toLowerCase())
+    })
+  }, [getCurrentList, debouncedSearchQuery, activeTab])
 
   const formatTime = (timeStr) => {
     return timeStr
@@ -43,16 +82,35 @@ const Matches = ({ onSelectMatch }) => {
     }
   }
 
-  const handleBlock = (match, e) => {
+  // Memoize handlers to prevent unnecessary re-renders
+  const handleBlock = useCallback((match, e) => {
     e.stopPropagation()
-    if (confirm(`Are you sure you want to block ${match.profile.name}?`)) {
-      blockUser(match.profile.id)
-      // Remove from matches
-      const updatedMatches = matches.filter(m => m.id !== match.id)
-      setMatches(updatedMatches)
-      alert(`${match.profile.name} has been blocked.`)
+    const profileName = match.profile?.name || match.name || 'this user'
+    const profileId = match.profile?.id || match.id
+    
+    if (!profileId) {
+      alert('Unable to block user: Invalid profile ID')
+      return
     }
-  }
+    
+    if (confirm(`Are you sure you want to block ${profileName}?`)) {
+      blockUser(profileId)
+      // Remove from matches
+      setMatches(prev => prev.filter(m => m.id !== match.id))
+      
+      // Remove from likes sent and received
+      setLikesSent(prev => prev.filter(item => {
+        const itemProfileId = item.profileId || item.profile?.id
+        return itemProfileId !== profileId
+      }))
+      setLikesReceived(prev => prev.filter(item => {
+        const itemProfileId = item.profileId || item.profile?.id
+        return itemProfileId !== profileId
+      }))
+      
+      alert(`${profileName} has been blocked.`)
+    }
+  }, [])
 
   return (
     <div>
@@ -227,7 +285,15 @@ const Matches = ({ onSelectMatch }) => {
                     </p>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <p style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                        {formatTime(match.lastMessageTime || match.matchedAt || '')}
+                        {match.lastMessageTime 
+                          ? (typeof match.lastMessageTime === 'number' 
+                              ? formatTime(match.lastMessageTime) 
+                              : match.lastMessageTime)
+                          : match.matchedAt 
+                            ? (typeof match.matchedAt === 'number' 
+                                ? formatTime(match.matchedAt) 
+                                : match.matchedAt)
+                            : ''}
                       </p>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button
@@ -264,13 +330,28 @@ const Matches = ({ onSelectMatch }) => {
             ))
           ) : (
             filteredList.map((item) => {
-              const profile = item.profile || item
+              // Handle both match structure and likes sent/received structure
+              const profile = item.profile || (item.id ? item : null)
+              
+              // Skip items without valid profile data
+              if (!profile || (!profile.name && !item.profileId)) {
+                return null
+              }
+              
               return (
                 <div
-                  key={item.profileId || item.id || Date.now()}
+                  key={item.profileId || item.id || `like-${Date.now()}-${Math.random()}`}
                   className="card"
                   style={{ cursor: 'pointer' }}
-                  onClick={() => profile && onSelectMatch && onSelectMatch({ id: item.profileId || item.id, profile })}
+                  onClick={() => {
+                    if (profile && onSelectMatch) {
+                      // Create a match-like structure for navigation
+                      onSelectMatch({ 
+                        id: item.profileId || item.id || Date.now(), 
+                        profile: profile 
+                      })
+                    }
+                  }}
                 >
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
                     <div style={{ position: 'relative' }}>
@@ -321,7 +402,7 @@ const Matches = ({ onSelectMatch }) => {
                   </div>
                 </div>
               )
-            })
+            }).filter(Boolean) // Remove null entries
           )}
         </div>
       )}

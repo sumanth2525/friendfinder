@@ -1,10 +1,55 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { MenuIcon, MoonIcon, SunIcon } from './Icons'
 import { getInsights } from '../utils/activityTracker'
+import { getMemberStatsOptimized } from '../utils/memberStats'
+import { adminService } from '../services/adminService'
 
-const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile }) => {
+const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile, onNavigateToAdmin, onNavigateToHome, supabase }) => {
   const [showMenu, setShowMenu] = useState(false)
   const [showInsights, setShowInsights] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [insightsLastUpdated, setInsightsLastUpdated] = useState(null)
+  const [cachedInsights, setCachedInsights] = useState(null)
+    const [memberStats, setMemberStats] = useState({
+      menCount: 0,
+      womenCount: 0,
+      onlineCount: 0, // Show real count, not fake "20+"
+      isLoading: true,
+      hasLoadedRealData: false
+    })
+  
+  // Load insights with 6-hour cache
+  useEffect(() => {
+    const loadInsights = () => {
+      const lastUpdated = localStorage.getItem('insights_last_updated')
+      const cached = localStorage.getItem('insights_cache')
+      const now = Date.now()
+      const sixHours = 6 * 60 * 60 * 1000 // 6 hours in milliseconds
+      
+      if (lastUpdated && cached && (now - parseInt(lastUpdated)) < sixHours) {
+        // Use cached insights
+        setCachedInsights(JSON.parse(cached))
+        setInsightsLastUpdated(new Date(parseInt(lastUpdated)))
+      } else {
+        // Refresh insights
+        const freshInsights = getInsights()
+        setCachedInsights(freshInsights)
+        setInsightsLastUpdated(new Date())
+        localStorage.setItem('insights_cache', JSON.stringify(freshInsights))
+        localStorage.setItem('insights_last_updated', now.toString())
+      }
+    }
+    
+    loadInsights()
+    
+    // Check every hour if we need to refresh
+    const interval = setInterval(() => {
+      loadInsights()
+    }, 60 * 60 * 1000) // Check every hour
+    
+    return () => clearInterval(interval)
+  }, [])
+  
   const getAvatarInitials = () => {
     if (user?.avatar) return user.avatar
     if (user?.name) {
@@ -26,7 +71,24 @@ const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile }) =
     return 'U'
   }
 
-  const insights = getInsights()
+  const insights = cachedInsights || getInsights()
+  
+  const formatLastUpdated = () => {
+    if (!insightsLastUpdated) return 'Never'
+    const now = Date.now()
+    const updated = insightsLastUpdated.getTime()
+    const diff = now - updated
+    const hours = Math.floor(diff / (60 * 60 * 1000))
+    const minutes = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000))
+    
+    if (hours < 1) {
+      return `${minutes} minutes ago`
+    } else if (hours < 24) {
+      return `${hours} hour${hours > 1 ? 's' : ''} ago`
+    } else {
+      return insightsLastUpdated.toLocaleDateString()
+    }
+  }
 
   const handleMenuToggle = () => {
     setShowMenu(!showMenu)
@@ -40,6 +102,79 @@ const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile }) =
   const handleCloseInsights = () => {
     setShowInsights(false)
   }
+
+  // Check if user is admin
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (!user?.id || !supabase) {
+        setIsAdmin(false)
+        return
+      }
+
+      try {
+        const isAdminUser = await adminService.checkAdminAccess(user.id)
+        setIsAdmin(isAdminUser)
+      } catch (error) {
+        console.error('Error checking admin status:', error)
+        setIsAdmin(false)
+      }
+    }
+
+    checkAdminStatus()
+  }, [user?.id, supabase])
+
+  // Fetch member stats on mount and every 30 seconds
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const stats = await getMemberStatsOptimized(supabase)
+        if (!stats.error) {
+          setMemberStats(prev => {
+            // Always show real counts, never fake "20+"
+            return {
+              menCount: stats.menCount || 0,
+              womenCount: stats.womenCount || 0,
+              onlineCount: stats.onlineCount || 0,
+              isLoading: false,
+              hasLoadedRealData: true
+            }
+          })
+        } else {
+          // If error, show 0 instead of fake numbers
+          setMemberStats(prev => ({
+            ...prev,
+            menCount: 0,
+            womenCount: 0,
+            onlineCount: 0,
+            isLoading: false,
+            hasLoadedRealData: true
+          }))
+        }
+      } catch (error) {
+        console.error('Error fetching member stats:', error)
+        setMemberStats(prev => ({
+          ...prev,
+          menCount: 0,
+          womenCount: 0,
+          onlineCount: 0,
+          isLoading: false,
+          hasLoadedRealData: true
+        }))
+      }
+    }
+
+    // Fetch immediately, no fake delay
+    fetchStats()
+
+    // Then update every 30 seconds
+    const interval = setInterval(() => {
+      fetchStats()
+    }, 30000)
+
+    return () => {
+      clearInterval(interval)
+    }
+  }, [supabase])
 
   return (
     <>
@@ -59,7 +194,16 @@ const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile }) =
           >
             <MenuIcon size={24} />
           </button>
-        <h1 className="header-title" style={{ color: 'var(--text-primary)', fontSize: '20px' }}>
+        <h1 
+          className="header-title" 
+          style={{ 
+            color: 'var(--text-primary)', 
+            fontSize: '20px',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
+          onClick={() => onNavigateToHome && onNavigateToHome()}
+        >
           Discover
         </h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -152,6 +296,54 @@ const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile }) =
               </button>
             </div>
 
+            {/* Member Stats */}
+            <div style={{
+              background: 'var(--gradient-primary)',
+              borderRadius: '16px',
+              padding: '16px',
+              marginBottom: '20px',
+              color: 'white',
+            }}>
+              <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', opacity: 0.9 }}>
+                Community Stats
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '20px', fontWeight: '700', marginBottom: '4px' }}>
+                    {memberStats.isLoading ? '...' : memberStats.menCount.toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: '11px', opacity: 0.9 }}>Men</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '20px', fontWeight: '700', marginBottom: '4px' }}>
+                    {memberStats.isLoading ? '...' : memberStats.womenCount.toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: '11px', opacity: 0.9 }}>Women</div>
+                </div>
+              </div>
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.2)',
+                borderRadius: '12px',
+                padding: '12px',
+                textAlign: 'center',
+                backdropFilter: 'blur(10px)',
+              }}>
+                <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: '#10b981',
+                    display: 'inline-block',
+                    animation: 'pulse 2s infinite',
+                    boxShadow: '0 0 8px rgba(16, 185, 129, 0.6)',
+                  }}></span>
+                  {memberStats.isLoading ? '...' : memberStats.onlineCount.toLocaleString()}
+                </div>
+                <div style={{ fontSize: '11px', opacity: 0.9 }}>Online Now</div>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 onClick={handleInsightsClick}
@@ -193,6 +385,28 @@ const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile }) =
                 <span style={{ fontSize: '20px' }}>👤</span>
                 Profile
               </button>
+              {isAdmin && onNavigateToAdmin && (
+                <button
+                  onClick={onNavigateToAdmin}
+                  style={{
+                    padding: '12px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--warning)',
+                    borderRadius: '12px',
+                    color: 'var(--warning)',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                  }}
+                >
+                  <span style={{ fontSize: '20px' }}>🛡️</span>
+                  Admin Panel
+                </button>
+              )}
               <button
                 onClick={onLogout}
                 style={{
@@ -249,7 +463,14 @@ const Header = ({ user, onLogout, theme, onThemeChange, onNavigateToProfile }) =
           onClick={(e) => e.stopPropagation()}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: '700', color: 'var(--text-primary)' }}>Your Activity Insights</h2>
+            <div>
+              <h2 style={{ fontSize: '24px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                Your Activity Insights
+              </h2>
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                Last updated: {formatLastUpdated()}
+              </p>
+            </div>
             <button
               onClick={handleCloseInsights}
               style={{

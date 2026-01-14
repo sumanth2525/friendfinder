@@ -37,10 +37,14 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
   const [confirmPasswordError, setConfirmPasswordError] = useState('')
   
   // User info states - Basic
-  const [name, setName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [gender, setGender] = useState('')
   const [age, setAge] = useState('')
   const [location, setLocation] = useState('')
-  const [nameError, setNameError] = useState('')
+  const [firstNameError, setFirstNameError] = useState('')
+  const [lastNameError, setLastNameError] = useState('')
+  const [genderError, setGenderError] = useState('')
   const [ageError, setAgeError] = useState('')
   const [locationError, setLocationError] = useState('')
   
@@ -116,13 +120,16 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
     }
   }
   
-  // Toggle interest selection
+  // Toggle interest selection (max 6)
   const toggleInterest = (interest) => {
-    setSelectedInterests(prev => 
-      prev.includes(interest) 
-        ? prev.filter(i => i !== interest)
-        : [...prev, interest]
-    )
+    setSelectedInterests(prev => {
+      if (prev.includes(interest)) {
+        return prev.filter(i => i !== interest)
+      } else if (prev.length < 6) {
+        return [...prev, interest]
+      }
+      return prev // Don't add if already at max
+    })
   }
 
   // Handle OTP send for sign-up
@@ -246,14 +253,27 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
   const handleSubmitBasic = (e) => {
     e.preventDefault()
     setError('')
-    setNameError('')
+    setFirstNameError('')
+    setLastNameError('')
+    setGenderError('')
     setAgeError('')
     setLocationError('')
     
-    // Validate name
-    const nameValidation = validateName(name)
-    if (!nameValidation.valid) {
-      setNameError(nameValidation.message)
+    // Validate first name
+    if (!firstName.trim() || firstName.trim().length < 2) {
+      setFirstNameError('First name must be at least 2 characters')
+      return
+    }
+    
+    // Validate last name
+    if (!lastName.trim() || lastName.trim().length < 2) {
+      setLastNameError('Last name must be at least 2 characters')
+      return
+    }
+    
+    // Validate gender
+    if (!gender) {
+      setGenderError('Please select your gender')
       return
     }
     
@@ -313,7 +333,10 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
     // Create user with all collected data
     setTimeout(() => {
       const userData = {
-        name: name.trim(),
+        name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        gender: gender,
         age: parseInt(age) || 18, // Default to 18 if parsing fails
         location: location.trim(),
         phone: loginMethod === 'phone' ? phone : null,
@@ -870,9 +893,76 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
         </div>
 
         <form onSubmit={handleSubmitBasic} style={{ width: '100%' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+            <div>
+              <label 
+                htmlFor="firstName"
+                style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: 'var(--text-primary)'
+                }}
+              >
+                First Name
+              </label>
+              <input
+                id="firstName"
+                type="text"
+                className="input"
+                placeholder="John"
+                value={firstName}
+                onChange={(e) => {
+                  setFirstName(e.target.value)
+                  setFirstNameError('')
+                }}
+                required
+                style={{ width: '100%' }}
+              />
+              {firstNameError && (
+                <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>
+                  {firstNameError}
+                </p>
+              )}
+            </div>
+            <div>
+              <label 
+                htmlFor="lastName"
+                style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: 'var(--text-primary)'
+                }}
+              >
+                Last Name
+              </label>
+              <input
+                id="lastName"
+                type="text"
+                className="input"
+                placeholder="Doe"
+                value={lastName}
+                onChange={(e) => {
+                  setLastName(e.target.value)
+                  setLastNameError('')
+                }}
+                required
+                style={{ width: '100%' }}
+              />
+              {lastNameError && (
+                <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>
+                  {lastNameError}
+                </p>
+              )}
+            </div>
+          </div>
+
           <div style={{ marginBottom: '20px' }}>
             <label 
-              htmlFor="name"
+              htmlFor="gender"
               style={{
                 display: 'block',
                 marginBottom: '8px',
@@ -881,24 +971,28 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
                 color: 'var(--text-primary)'
               }}
             >
-              Full Name (First & Last)
+              Gender
             </label>
-            <input
-              id="name"
-              type="text"
+            <select
+              id="gender"
               className="input"
-              placeholder="John Doe"
-              value={name}
+              value={gender}
               onChange={(e) => {
-                setName(e.target.value)
-                setNameError('')
+                setGender(e.target.value)
+                setGenderError('')
               }}
               required
               style={{ width: '100%' }}
-            />
-            {nameError && (
+            >
+              <option value="">Select Gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Non-binary">Non-binary</option>
+              <option value="Prefer not to say">Prefer not to say</option>
+            </select>
+            {genderError && (
               <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>
-                {nameError}
+                {genderError}
               </p>
             )}
           </div>
@@ -1299,7 +1393,7 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
             marginTop: '8px',
             textAlign: 'center'
           }}>
-            Step 3 of 5 • {selectedInterests.length} selected
+            Step 3 of 5 • {selectedInterests.length}/6 selected
           </p>
         </div>
 
@@ -1358,9 +1452,9 @@ const SignUp = ({ onSignUp, onSwitchToLogin }) => {
             onClick={handleSubmitInterests}
             className="btn btn-primary"
             style={{ flex: 2 }}
-            disabled={selectedInterests.length < 3}
+            disabled={selectedInterests.length < 3 || selectedInterests.length > 6}
           >
-            Continue ({selectedInterests.length}/3)
+            Continue ({selectedInterests.length}/6)
           </button>
         </div>
       </div>
